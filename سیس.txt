@@ -1,0 +1,129 @@
+const express = require('express');
+const fetch = require('node-fetch');
+const FormData = require('form-data');
+const Queue = require('bull');
+
+const app = express();
+app.use(express.json());
+
+const botToken = '8038494688:AAFh8AyM1Jv-x717xZXPf7cO1CcuFIJJW48'; // توکن جدید شما
+const messageQueue = new Queue('messageQueue');
+
+const ownerId = 7289482843; // آی‌دی تلگرام شما (سازنده ربات)
+
+let isBotActive = true; // وضعیت ربات (فعال/غیرفعال)
+
+const responses = {
+  '/start': ["سلامت کو؟", "چطوری؟ خوش آمدی!"],
+  'سلام': ["چپ خاندان ته بچه خر", "سلام! چطور هستی؟", "جون صدقه سلامت شوم"],
+  'خوبی': ["تره چی", "حالت چطور است؟"],
+  'چطوری': ["خوبم مرسی! تو چطوری؟", "سلام! من خوبم، تو چی؟", "حالم خوبم مگم صحت ام خوب نیست"],
+  'بیو': [
+    "گویته خوردی بچیم مه بیو یاد ندارم", "دل من از همگی سرد است", "میو بس خلاص",
+    "تو غال مغال نکو برادر بس خلاص", "بقران جایدی ما بس کو", "تشناب نرو دلبر خطر در کمین است",
+    "هر کی مکتب رفت کندکی شد", "گ شوین کندکی نشوین", "بیخی جمع کو خر مر ته"
+  ],
+  'ایدی': ["برو لوده لوده نکو", "چطور برم؟ برو خودت!"],
+  'سگ': ["خر", "این نوع گفتار مناسب نیست."],
+  'میتی': ["ها میتم ده مشت هایت میگیری", "مواظب باش!"],
+  'کشمش': ["ایقه کشمش نگو", "دفعه بعد اینو نگو!"],
+  'نخود': ["او را صدا نکن که بیابت می‌کنم", "نخود رو صدا نزن!", "هر کی بره خانه خود"],
+  'فکاهی': ["بیخی لوده فقد جلالی باشم", "این چیه میگی؟"],
+  'ربات': ["چی میگی ایلایی"],
+  'شب خوش': ["از صمیم قلب شبت خوش نباشه"],
+  'خدافز': ["بلایم ده پست گم شو"],
+  'خداحافظ': ["خدافز نیم جای 🙁"],
+  'پسته': ["بینی آش است مثل خسته", "بکنید سر بسته"],
+  'گ خوردی': ["گ اگر خوردنی میبود جیهون وقت خورده بود"],
+  'رل پی': ["قواره ته سیل کو بی عقل"],
+  '.': ["نقطه نزن کول معلوم نمیشی"],
+
+  // کلمات جدید اضافه‌شده
+  'شبیر': ["شبیر خر بود و می‌باشد 😐"],
+  'زید': ["عشق است زید جان خو ❤️"],
+  'جانم': ["قندم وحید ترکتور فدایت"],
+  'مارال': ["میده گی گگ است جعان 🫠♥️"]
+};
+
+async function postReq(url, fields) {
+  const tgFormData = new FormData();
+  fields.forEach(obj => Object.entries(obj).forEach(([key, value]) => tgFormData.append(key, value)));
+
+  return await fetch(`https://api.telegram.org/bot${botToken}/${url}`, {
+    method: 'POST',
+    body: tgFormData,
+  });
+}
+
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+const generateInlineKeyboard = () => ({
+  "inline_keyboard": [
+    [{ text: "کشمش بسته", callback_data: "mute_group" }, { text: "کشمش باز", callback_data: "unmute_group" }],
+    [{ text: "تماس با سازنده", url: "https://t.me/zaid_RASOOLY_01" }],
+    [{ text: "درباره ربات", callback_data: "about_bot" }]
+  ]
+});
+
+app.get('/', async (req, res) => {
+  try {
+    const telegramResponse = await postReq("setWebhook", [{ "url": `https://${req.hostname}/hook` }]);
+    res.send(`<html><body><h1>Telegram Bot Webhook</h1><p>${await telegramResponse.text()}</p></body></html>`);
+  } catch (error) {
+    res.status(500).send("Error setting webhook: " + error.message);
+  }
+});
+
+app.post('/hook', async (req, res) => {
+  try {
+    const json = req.body;
+    await delay(1000);
+
+    if (!json.message) return res.send("ok");
+
+    const rawText = json.message.text;
+    const chatId = json.message.chat.id;
+    const senderId = json.message.from.id;
+
+    // دستور "/start"
+    if (rawText === "/start") {
+      await postReq('sendMessage', [{ chat_id: chatId }, { text: "سلام! ربات کشمش آماده به کار است.", reply_markup: JSON.stringify(generateInlineKeyboard()) }]);
+      return res.send("ok");
+    }
+
+    // خاموش و روشن کردن ربات فقط توسط شما
+    if (senderId === ownerId) {
+      if (rawText === "خاموش") {
+        isBotActive = false;
+        await postReq('sendMessage', [{ chat_id: chatId }, { text: "ربات خاموش شد. فقط شما می‌توانید آن را روشن کنید." }]);
+        return res.send("ok");
+      }
+      if (rawText === "روشن") {
+        isBotActive = true;
+        await postReq('sendMessage', [{ chat_id: chatId }, { text: "ربات دوباره روشن شد و آماده به کار است." }]);
+        return res.send("ok");
+      }
+    }
+
+    // اگر ربات خاموش باشد، به هیچ پیامی پاسخ ندهد
+    if (!isBotActive) return res.send("ok");
+
+    const normalizedText = rawText.trim().toLowerCase().replace(/[ـ،؟؛!,.]/g, '').replace(/\s+/g, ' ');
+    const responseText = responses[normalizedText];
+
+    if (responseText) {
+      messageQueue.add({ chatId, text: responseText[Math.floor(Math.random() * responseText.length)], replyToMessageId: json.message.message_id });
+    }
+
+    res.send("ok");
+  } catch (error) {
+    res.status(500).send("Error processing message: " + error.message);
+  }
+});
+
+messageQueue.process(async (job) => {
+  const { chatId, text, replyToMessageId } = job.data;
+  await postReq('sendMessage', [{ chat_id: chatId }, { text, reply_to_message_id: replyToMessageId }]);
+});
+
+app.listen(3000, () => console.log('Server is running on port 3000'));
